@@ -651,7 +651,7 @@
     var textResult;
     function fontLoader(){
         $.ajax({
-        url: "text.json",
+        url: "assets/js/text.json",
         success: function(result){
              result.sort(function (a, b) {
                 return -1 * (a.str.length - b.str.length);
