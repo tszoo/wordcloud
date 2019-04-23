@@ -1,5 +1,5 @@
 # wordcloud
 
-threejs word cloud prototype
+threejs word cloud text animation prototype
 
 [preview link](https://tszoo.github.io/wordcloud/)
