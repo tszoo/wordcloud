@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>text animation</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        html,body{width:100%}
+        html{font-size:10px}
+        body,div,dl,dt,dd,ul,ol,li,h1,h2,h3,h4,h5,form,fieldset,p,button{margin:0;padding:0}
+        body,h1,h2,h3,h4,input,button{font-family:Dotum,Helvetica,sans-serif;font-size:12px;}
+        body{text-align:left;*word-break:break-all;-ms-word-break:break-all}
+        img,fieldset,iframe{border:0 none}
+        li{list-style:none}
+        html, body {height:100% ;    background-color: #ccc;}
+        canvas {
+            position: absolute;
+        }
+        #btn{position: absolute;bottom:20px;right:20px}
+    </style>
+</head>
+
+<body>
+<div id="dat"></div>
+<div id="three-container"></div>
+<div><a href="#" id="btn">play</a></div>
+<script src="assets/js/vendor/jquery-2.2.3.min.js"></script>
+<script src="assets/js/vendor/dat.gui.js"></script>
+<script src="assets/js/vendor/TweenMax.min.js"></script>
+<script src="assets/js/vendor/three.min.js"></script>
+<script src="assets/js/vendor/BufferGeometryUtils.js"></script>
+<script src="assets/js/vendor/OrbitControls.js"></script>
+<script src="assets/js/vendor/bas.js"></script>
+<script src="assets/js/ThreeRoot.js"></script>
+<script>
+
+    (function() {
+        /**
+         * Simple Point class.
+         *
+         * Any method that takes an x and y may also take a point.
+         */
+        function Point(x, y) {
+            this.set(x, y);
+        }
+
+        Point.prototype = {
+            clone: function clone() {
+                return new Point(this.x, this.y);
+            },
+
+            set: function set(x, y) {
+                this.x = x;
+                this.y = y;
+                return this;
+            },
+
+            equals: function equals(x, y) {
+                return this.x == x && this.y == y;
+            },
+
+            toString: function toString() {
+                return "(" + this.x + "," + this.y + ")";
+            },
+
+            map: function map(f) {
+                this.x = f.call(this, this.x);
+                this.y = f.call(this, this.y);
+                return this;
+            },
+
+            add: function add(x, y) {
+                this.x += x;
+                this.y += y;
+                return this;
+            },
+
+            subtract: function subtract(x, y) {
+                this.x -= x;
+                this.y -= y;
+                return this;
+            },
+
+            scale: function scale(s) {
+                this.x *= s;
+                this.y *= s;
+                return this;
+            },
+
+            isZero() {
+                return this.x == 0 && this.y == 0;
+            },
+        };
+
+        (function() {
+            function takePointOrArgs(f) {
+                return function(arg1, arg2) {
+                    if (arg2 === undefined)
+                        return f.call(this, arg1.x, arg1.y);
+                    return f.call(this, arg1, arg2);
+                };
+            }
+
+            for (let f of ["add", "subtract", "equals", "set"])
+                Point.prototype[f] = takePointOrArgs(Point.prototype[f]);
+        })();
+
+
+        /**
+         * Rect is a simple data structure for representation of a rectangle supporting
+         * many basic geometric operations.
+         *
+         * NOTE: Since its operations are closed, rectangles may be empty and will report
+         * non-positive widths and heights in that case.
+         */
+
+        function Rect(x, y, w, h) {
+            this.left = x+ (w*-0.5);
+            this.top = y+ (h*-0.5);
+            this.right = x+(w*0.5);
+            this.bottom = y+(h*0.5);
+        }
+
+        Rect.fromRect = function fromRect(r) {
+            return new Rect(r.left, r.top, r.right - r.left, r.bottom - r.top);
+        };
+
+        Rect.prototype = {
+            get x() { return this.left; },
+            get y() { return this.top; },
+            get width() { return this.right - this.left; },
+            get height() { return this.bottom - this.top; },
+            set x(v) {
+                let diff = this.left - v;
+                this.left = v;
+                this.right -= diff;
+            },
+            set y(v) {
+                let diff = this.top - v;
+                this.top = v;
+                this.bottom -= diff;
+            },
+            set width(v) { this.right = this.left + v; },
+            set height(v) { this.bottom = this.top + v; },
+
+            isEmpty: function isEmpty() {
+                return this.left >= this.right || this.top >= this.bottom;
+            },
+
+            setRect(x, y, w, h) {
+                this.left = x;
+                this.top = y;
+                this.right = x + w;
+                this.bottom = y + h;
+
+                return this;
+            },
+
+            setBounds(l, t, r, b) {
+                this.top = t;
+                this.left = l;
+                this.bottom = b;
+                this.right = r;
+
+                return this;
+            },
+
+            equals: function equals(other) {
+                return other != null &&
+                        (this.isEmpty() && other.isEmpty() ||
+                        this.top == other.top &&
+                        this.left == other.left &&
+                        this.bottom == other.bottom &&
+                        this.right == other.right);
+            },
+
+            clone: function clone() {
+                return new Rect(this.left, this.top, this.right - this.left, this.bottom - this.top);
+            },
+
+            center: function center() {
+                if (this.isEmpty())
+                    throw "Empty rectangles do not have centers";
+                return new Point(this.left + (this.right - this.left) / 2,
+                        this.top + (this.bottom - this.top) / 2);
+            },
+
+            copyFrom(other) {
+                this.top = other.top;
+                this.left = other.left;
+                this.bottom = other.bottom;
+                this.right = other.right;
+
+                return this;
+            },
+
+            translate(x, y) {
+                this.left += x;
+                this.right += x;
+                this.top += y;
+                this.bottom += y;
+
+                return this;
+            },
+
+            toString() {
+                return "[" + this.x + "," + this.y + "," + this.width + "," + this.height + "]";
+            },
+
+            /** return a new rect that is the union of that one and this one */
+            union(other) {
+                return this.clone().expandToContain(other);
+            },
+
+            contains(other) {
+                if (other.isEmpty()) return true;
+                if (this.isEmpty()) return false;
+
+                return (other.left >= this.left &&
+                other.right <= this.right &&
+                other.top >= this.top &&
+                other.bottom <= this.bottom);
+            },
+
+            intersect(other) {
+                return this.clone().restrictTo(other);
+            },
+
+            intersects(other) {
+                if (this.isEmpty() || other.isEmpty())
+                    return false;
+
+                let x1 = Math.max(this.left, other.left);
+                let x2 = Math.min(this.right, other.right);
+                let y1 = Math.max(this.top, other.top);
+                let y2 = Math.min(this.bottom, other.bottom);
+                return x1 < x2 && y1 < y2;
+            },
+
+            /** Restrict area of this rectangle to the intersection of both rectangles. */
+            restrictTo: function restrictTo(other) {
+                if (this.isEmpty() || other.isEmpty())
+                    return this.setRect(0, 0, 0, 0);
+
+                let x1 = Math.max(this.left, other.left);
+                let x2 = Math.min(this.right, other.right);
+                let y1 = Math.max(this.top, other.top);
+                let y2 = Math.min(this.bottom, other.bottom);
+                // If width or height is 0, the intersection was empty.
+                return this.setRect(x1, y1, Math.max(0, x2 - x1), Math.max(0, y2 - y1));
+            },
+
+            /** Expand this rectangle to the union of both rectangles. */
+            expandToContain: function expandToContain(other) {
+                if (this.isEmpty()) return this.copyFrom(other);
+                if (other.isEmpty()) return this;
+
+                let l = Math.min(this.left, other.left);
+                let r = Math.max(this.right, other.right);
+                let t = Math.min(this.top, other.top);
+                let b = Math.max(this.bottom, other.bottom);
+                return this.setRect(l, t, r - l, b - t);
+            },
+
+            /**
+             * Expands to the smallest rectangle that contains original rectangle and is bounded
+             * by lines with integer coefficients.
+             */
+            expandToIntegers: function round() {
+                this.left = Math.floor(this.left);
+                this.top = Math.floor(this.top);
+                this.right = Math.ceil(this.right);
+                this.bottom = Math.ceil(this.bottom);
+                return this;
+            },
+
+            scale: function scale(xscl, yscl) {
+                this.left *= xscl;
+                this.right *= xscl;
+                this.top *= yscl;
+                this.bottom *= yscl;
+                return this;
+            },
+
+            map: function map(f) {
+                this.left = f.call(this, this.left);
+                this.top = f.call(this, this.top);
+                this.right = f.call(this, this.right);
+                this.bottom = f.call(this, this.bottom);
+                return this;
+            },
+
+            /** Ensure this rectangle is inside the other, if possible. Preserves w, h. */
+            translateInside: function translateInside(other) {
+                let offsetX = 0;
+                if (this.left <= other.left)
+                    offsetX = other.left - this.left;
+                else if (this.right > other.right)
+                    offsetX = other.right - this.right;
+
+                let offsetY = 0;
+                if (this.top <= other.top)
+                    offsetY = other.top - this.top;
+                else if (this.bottom > other.bottom)
+                    offsetY = other.bottom - this.bottom;
+
+                return this.translate(offsetX, offsetY);
+            },
+
+            /** Subtract other area from this. Returns array of rects whose union is this-other. */
+            subtract: function subtract(other) {
+                let r = new Rect(0, 0, 0, 0);
+                let result = [];
+                other = other.intersect(this);
+                if (other.isEmpty())
+                    return [this.clone()];
+
+                // left strip
+                r.setBounds(this.left, this.top, other.left, this.bottom);
+                if (!r.isEmpty())
+                    result.push(r.clone());
+                // inside strip
+                r.setBounds(other.left, this.top, other.right, other.top);
+                if (!r.isEmpty())
+                    result.push(r.clone());
+                r.setBounds(other.left, other.bottom, other.right, this.bottom);
+                if (!r.isEmpty())
+                    result.push(r.clone());
+                // right strip
+                r.setBounds(other.right, this.top, this.right, this.bottom);
+                if (!r.isEmpty())
+                    result.push(r.clone());
+
+                return result;
+            },
+
+            /**
+             * Blends two rectangles together.
+             * @param rect Rectangle to blend this one with
+             * @param scalar Ratio from 0 (returns a clone of this rect) to 1 (clone of rect).
+             * @return New blended rectangle.
+             */
+            blend: function blend(rect, scalar) {
+                return new Rect(
+                        this.left + (rect.left - this.left ) * scalar,
+                        this.top + (rect.top - this.top ) * scalar,
+                        this.width + (rect.width - this.width ) * scalar,
+                        this.height + (rect.height - this.height) * scalar);
+            },
+
+            /**
+             * Grows or shrinks the rectangle while keeping the center point.
+             * Accepts single multipler, or separate for both axes.
+             */
+            inflate: function inflate(xscl, yscl) {
+                let xAdj = (this.width * xscl - this.width) / 2;
+                let s = (arguments.length > 1) ? yscl : xscl;
+                let yAdj = (this.height * s - this.height) / 2;
+                this.left -= xAdj;
+                this.right += xAdj;
+                this.top -= yAdj;
+                this.bottom += yAdj;
+                return this;
+            },
+
+            /**
+             * Grows or shrinks the rectangle by fixed amount while keeping the center point.
+             * Accepts single fixed amount
+             */
+            inflateFixed: function inflateFixed(fixed) {
+                this.left -= fixed;
+                this.right += fixed;
+                this.top -= fixed;
+                this.bottom += fixed;
+                return this;
+            },
+        };
+
+
+        window.Rect = Rect;
+        window.Point = Point;
+    }());
+
+    window.onload = init;
+    var root, animation;
+    var lastPos=[];
+    var textCanvasSize = {w: 2048, h: 2048};
+    var TweenSpeed = 10.0;
+    var textGeometry, text, textShape;
+    var textBufferArr = [];
+    var rndtextArr = [];
+    var fontSize = 35;
+    var particleGeometry;
+    var isRnd = true;
+    var fontContainer;
+    
+    var param = {
+        particleGap : 55,
+        particleSize: 110,
+        fontSize: fontSize,
+        showMask:true,
+        showParticlel:false,
+        showWord:true,
+    };
+
+    var maskImage;
+    var particlePixelPos;
+    var particleLength ;
+    var totalPaticleArr = [];
+    var objInfo =[];
+
+
+    var textPoint = [];
+
+    var scale = 1;
+    var path = 'assets/img';
+    function backingScale() {
+        if ('devicePixelRatio' in window) {
+            if (window.devicePixelRatio > 1) {
+                return window.devicePixelRatio;
+            }
+        }
+        return 1;
+    }
+
+    var gui=  new dat.GUI();
+    gui.add(param, 'fontSize', 1, 100, 1).onChange( changeUpdate ).name('fontSize');
+    gui.add(param, 'particleGap', 1, 100, 1).onChange( changeUpdate ).name('particleGap');
+    gui.add(param, 'particleSize', 1, 100, 1).onChange( changeUpdate ).name('particleSize');
+    gui.add(param, 'showParticlel').onChange( changeUpdate ).name('showParticlel');
+    gui.add(param, 'showMask').onChange( changeUpdate ).name('showMask');
+    gui.add(param, 'showWord').onChange( changeUpdate ).name('showWord');
+
+    function changeUpdate(){
+        if(maskImage){
+            maskImage.visible =  param.showMask;
+        }
+        if(fontContainer){
+            fontContainer.visible = param.showWord;
+        }
+        param.showParticlel = param.showParticlel;
+        param.particleSize = param.particleSize;
+        param.particleGap = param.particleGap;
+
+//        reset();
+//        makeMaskShape("1_1.jpg");
+    }
+
+    function reset(){
+        totalPaticleArr = [];
+        objInfo =[];
+        textPoint = [];
+        textBufferArr = [];
+        while(root.scene.children.length > 0){
+            root.scene.remove(root.scene.children[0]);
+        }
+        fontContainer = new THREE.Object3D();
+        fontContainer.position.set(0, 0, 0);
+        root.add(fontContainer);
+    }
+
+    function init() {
+        root = new THREERoot({
+            createCameraControls: true,
+            antialias: (window.devicePixelRatio === 1),
+            fov: 60
+        });
+        root.renderer.setClearColor(0x000000);
+        root.camera.position.set(0, 0, 2000);
+
+        var light = new THREE.DirectionalLight(0xffffff ,1);
+        light.position.set(0, 0, 10);
+        root.add(light);
+
+        var axisHelper = new THREE.AxesHelper(5);
+        root.scene.add(axisHelper);
+
+
+        fontContainer = new THREE.Object3D();
+        fontContainer.position.set(0, 0, 0);
+        root.add(fontContainer);
+        fontContainer.visible = param.showWord;
+
+        scale = backingScale();
+
+        makeMaskShape("1_1.jpg");
+//        makeMaskShape("2_1.jpg");
+//        makeMaskShape("3_1.jpg");
+
+
+        var playBtn = document.getElementById('btn');
+        playBtn.addEventListener('click', function(e){
+            e.preventDefault();
+            var step = {value: 0};
+            var tweenTime = 10;
+            var count = particlePixelPos.length;
+            var rndPos = randPos(count).array;
+
+            TweenMax.to(step, tweenTime, { value:1, onUpdate: function () {
+                var count= textBufferArr.length;
+                for (var i = 0; i < count; i++) {
+                    if(isRnd){
+                        textBufferArr[i].position.x += rndPos[i *3] * step.value;
+                        textBufferArr[i].position.y += rndPos[i *3+1] * step.value;
+                        textBufferArr[i].position.z +=  rndPos[i *3+2] * step.value;
+//                        textBufferArr[i].material.opacity =  1 - step.value;
+                        maskImage.material.opacity = (1 - step.value)*0.1;
+                    }else{
+                        textBufferArr[i].position.x = lastPos[i].x - ((lastPos[i].x - objInfo[i].x ) * step.value );
+                        textBufferArr[i].position.y = lastPos[i].y - ((lastPos[i].y - objInfo[i].y) * step.value );
+                        textBufferArr[i].position.z = lastPos[i].z- ((lastPos[i].z - objInfo[i].z)  * step.value );
+//                        textBufferArr[i].material.opacity = step.value;
+                        maskImage.material.opacity =  step.value * 0.1;
+
+                    }
+
+                }
+            }, onComplete: function () {
+                lastPos = [];
+                var count = textBufferArr.length, position;
+                for (var i = 0; i < count; i++) {
+                    position={};
+                    position.x = textBufferArr[i].position.x ;
+                    position.y = textBufferArr[i].position.y;
+                    position.z = textBufferArr[i].position.z;
+                    lastPos.push(position);
+//                    textBufferArr[i].material.opacity = 1;
+                }
+                isRnd = !isRnd;
+            }
+            });
+
+        })
+    }
+
+
+
+    function makeMaskShape(_img){
+        var imageObj = new Image();
+        imageObj.onload = function() {
+            var  maskCanvas = document.createElement('canvas');
+            maskCanvas.width = floorPowerOfTwo(imageObj.width);
+            maskCanvas.height = floorPowerOfTwo(imageObj.height);
+            textCanvasSize = {w: maskCanvas.width, h: maskCanvas.height};
+
+            var ctx = maskCanvas.getContext('2d');
+            ctx.clearRect(0, 0,   maskCanvas.width,     maskCanvas.height );
+            ctx.drawImage(imageObj, 0, 0, textCanvasSize.w, textCanvasSize.h);
+
+            var texture = new THREE.Texture( maskCanvas );
+            texture.needsUpdate = true;
+
+            var geometry = new THREE.PlaneGeometry( maskCanvas.width,   maskCanvas.height);
+            var material = new  THREE.MeshBasicMaterial( { map: texture,  wireframe:false,  transparent:true} );
+            material.opacity = 0.1;
+            material.needsUpdate = true;
+            maskImage = new THREE.Mesh( geometry, material );
+            maskImage.doubleSided = true;
+            root.add(maskImage);
+
+
+            var imageData = ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+            var pixelData = setDataPosition(imageData);
+            particlePositionSet(pixelData);
+
+            maskImage.visible =  param.showMask;
+            fontLoader();
+        };
+
+        imageObj.src = path + _img;
+    }
+
+
+    function particlePositionSet(pixelData){
+        var particles = pixelData;
+        var positions = [];
+
+        var colors = [];
+        var sizes = [];
+        var alphas = [];
+        var color = new THREE.Color();
+        var particleSize =  param.particleSize;
+
+        for (var i = 0; i < particles.length; i++) {
+            positions.push(particles[i].x - (textCanvasSize.w / 2));
+            positions.push(-particles[i].y + (textCanvasSize.h / 2));
+            positions.push(0);
+            colors.push(255,255,255);
+            sizes.push(particleSize);
+            alphas.push(1);
+        }
+        particlePixelPos = positions;
+        particleLength = totalPaticleArr.length - particles.length;
+
+        var bufferGeometry = new THREE.BufferGeometry();
+        var positionAttribute = new THREE.Float32BufferAttribute(positions, 3);
+        var colorAttribute = new THREE.Float32BufferAttribute(colors, 3);
+        colorAttribute.normalized = true;
+
+        bufferGeometry.addAttribute('position', positionAttribute);
+        bufferGeometry.addAttribute('color', colorAttribute);
+        bufferGeometry.addAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+        bufferGeometry.addAttribute('alpha', new THREE.Float32BufferAttribute(alphas, 1));
+        bufferGeometry.computeVertexNormals();
+        bufferGeometry.normalizeNormals();
+
+        var pointMaterial =  new THREE.PointsMaterial({
+            map: new THREE.TextureLoader().load(path + 'particle.png'),
+            size:particleSize,
+//            wireframe:true,
+            depthTest: false,
+            transparent: true,
+//            vertexColors: true,
+        });
+
+        pointMaterial.needsUpdate = true;
+        var particle = new THREE.Points(bufferGeometry,  pointMaterial);
+        particle.position.set(0, 0, 0);
+        particle.visible = param.showParticlel;
+        root.add(particle);
+    }
+
+
+    function setDataPosition(_data) {
+        var pix = _data.data;
+        var pixelArr = [];
+        var ww = textCanvasSize.w, hh = textCanvasSize.h;
+        var gap =  param.particleGap ;
+
+        for (var x = 0; x < ww; x += gap) {
+            for (var y = 0; y <hh; y += gap) {
+                totalPaticleArr.push(0);
+                var i = (y *ww + x) * 4;
+                if (pix[i + 4] > 0) {
+                    continue;
+                }
+                pixelArr.push({
+                    x: x,
+                    y: y,
+                    z: 0,
+                    r: pix[i] / 255,
+                    g: pix[i + 1] / 255,
+                    b: pix[i + 2] / 255,
+                    a: pix[i + 3] / 255,
+                });
+            }
+        }
+        return pixelArr;
+    }
+
+    var textResult;
+    function fontLoader(){
+        $.ajax({
+        url: "text.json",
+        success: function(result){
+             result.sort(function (a, b) {
+                return -1 * (a.str.length - b.str.length);
+            });
+            result.sort();
+            textResult = result;
+            textResultlength = result.length;
+            makeText();
+        }});
+    }
+
+    function setPos(arr){
+        var npos = [];
+        var len = arr.length /3;
+        for (var i = 0; i < len; i++) {
+            var pos = {};
+            pos.x = arr[i*3];
+            pos.y = arr[i*3+1];
+            pos.z = arr[i*3+2];
+//            pos.z = THREE.Math.randFloatSpread(100)
+            pos.bounding ={max: {x:param.particleSize*0.5,y:param.particleSize*0.5}, min:{x:-param.particleSize*0.5,y:-param.particleSize*0.5}} ;
+            pos.width = param.particleSize*0.5;
+            pos.height = param.particleSize*0.5;
+            npos.push(pos);
+        }
+        return  npos;
+    }
+
+
+    function randPos(count){
+        var pos = [];
+        for (var i = 0; i < count; i++) {
+            pos[i * 3] = THREE.Math.randFloatSpread(10) ;
+            pos[i * 3 + 1] = THREE.Math.randFloatSpread(10) ;
+            pos[i * 3 + 2] = THREE.Math.randFloatSpread(10) ;
+        }
+        return  new THREE.Float32BufferAttribute(pos);
+    }
+
+    function makeText(){
+        rndtextArr = [];
+        textPoint = textPoint.concat(setPos(particlePixelPos));
+        console.time("makeFontShape");
+//        for (var i = 0; i < textResultlength; i++) {
+        for (var i = 0; i < particleLength; i++) {
+            rndtextArr.push(textResult[i % textResultlength].str);
+//            rndtextArr.push(textResult[i].str);
+            makeFontShape(i);
+            trial(i);
+        }
+        console.timeEnd("makeFontShape");
+    }
+
+
+
+    var maxRetryCount = 500;
+    function trial( _idx){
+        var  trialCount = 0;
+        while (true) {
+            var c = createWord(_idx);
+            if (c) {
+                textPoint.push(c);
+                break;
+            }
+            trialCount += 1;
+            if (maxRetryCount < trialCount) {
+//                console.log(`finished: ${textPoint.length}`);
+                break;
+            }
+        }
+    }
+
+    function createWord(_idx){
+        var x =  THREE.Math.randFloatSpread(textCanvasSize.w);
+        var y =  THREE.Math.randFloatSpread(textCanvasSize.h);
+
+        for (var  another of textPoint) {
+            var r1 = new Rect(x, y,   objInfo[_idx].width, objInfo[_idx].height);
+            var r2 = new Rect(another.x, another.y,  another.width, another.height);
+            var intersects = r1.intersects(r2);
+            if (intersects) {
+                return;
+            }
+        }
+        objInfo[_idx].target.visible = true;
+        objInfo[_idx].x = x;
+        objInfo[_idx].y = y;
+        textBufferArr[_idx].position.x = x;
+        textBufferArr[_idx].position.y = y;
+        return objInfo[_idx];
+    }
+
+
+    function makeDummyShape(x,y,width,height){
+        var material = new THREE.MeshBasicMaterial({color: 0xffff00, side: THREE.DoubleSide});
+        var geometry = new THREE.PlaneGeometry(width, height, 10, 10 );
+        var plane = new THREE.Mesh(geometry, material);
+        plane.doubleSided = true;
+        plane.position.x = x;
+        plane.position.y = y;
+        root.add(plane);
+    }
+
+
+    function makeFontShape(_idx) {
+        var shapes = generateTexture(rndtextArr[_idx]);
+        var texture = new THREE.CanvasTexture(shapes);
+        texture.needsUpdate = true;
+        var material = new THREE.MeshBasicMaterial({map: texture, transparent: true ,side: THREE.DoubleSide, depthTest: false, wireframe:false});
+        var geometry = new THREE.PlaneGeometry(shapes.width, shapes.height, 10, 10 );
+        geometry.computeBoundingBox();
+        geometry.computeVertexNormals();
+
+        var plane = new THREE.Mesh(geometry, material);
+        plane.doubleSided = true;
+        plane.position.x = 0;
+        plane.position.y = 0;
+//        plane.position.z = THREE.Math.randFloatSpread(500);
+//        plane.position.x = geometry.boundingBox.max.x;
+//        plane.position.y = -geometry.boundingBox.max.y;
+        plane.visible = false;
+
+        textBufferArr.push(plane);
+        fontContainer.add(plane);
+
+//        console.log('geometry.boundingBox' ,geometry.boundingBox);
+//        TweenMax.fromTo(plane.material , 2.0, {opacity:0},{opacity:1, delay:0.05*_idx});
+
+        var textInfo = {target:plane, bounding:geometry.boundingBox, word : rndtextArr[_idx] , idx:_idx,
+            width:shapes.width,
+            height:shapes.height,
+            x:0,
+            y:0,
+            z:0
+        };
+
+//        console.log('textInfo' , geometry.boundingBox);
+        objInfo.push(textInfo);
+        return textInfo;
+    }
+
+
+    function generateTexture(_str) {
+        var width;
+        var height =  floorPowerOfTwo(fontSize * scale);
+//        var height =  fontSize * scale;
+        var text = _str;
+        var canvas = document.createElement('canvas');
+        var context = canvas.getContext('2d');
+        context.font = height + 'px kakao';
+        width =  floorPowerOfTwo(context.measureText(text).width);
+//        width =  context.measureText(text).width;
+        context.clearRect(0, 0, width, height);
+        canvas.width = width;
+        canvas.height = height;
+        context.font = height + 'px kakao';
+        context.textAlign = 'left';
+        context.textBaseline = 'top';
+        context.fillStyle = '#ffffff';
+//        console.log('generateTexture', width, height);
+        context.fillText(text, 0, 0,  width);
+        return canvas;
+    }
+
+
+    function floorPowerOfTwo(value) {
+        return Math.pow(2, Math.floor(Math.log(value) / Math.LN2));
+    }
+</script>
+</body>
+</html>
